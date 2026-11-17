@@ -11,7 +11,7 @@ FILES = {
 
     "Cargo.toml": r"""[package]
 name = "ferrokey"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [lib]
@@ -37,6 +37,7 @@ use std::sync::Mutex;
 enum Layer {
     Lower,
     Upper,
+    Numbers,
     Symbols,
 }
 
@@ -57,8 +58,11 @@ impl KeyboardState {
 
     fn row_len(row: usize) -> usize {
         match row {
-            0..=3 => 10,
-            4 => 6, // [SYM, LEFT, SPACE, RIGHT, CLR, ENTER]
+            0 => 3,  // Top Floating Pill: [PREV, NEXT, DONE]
+            1 => 10, // Q W E R T Y U I O P
+            2 => 9,  // A S D F G H J K L
+            3 => 9,  // SHIFT Z X C V B N M BKSP
+            4 => 4,  // 123 SYM SPACE ENTER
             _ => 10,
         }
     }
@@ -69,74 +73,110 @@ impl KeyboardState {
         self.row = new_row;
 
         if old_row != new_row {
-            if new_row == 4 {
-                self.col = match self.col {
-                    0..=1 => 0, // SYM
-                    2 => 1,     // LEFT
-                    3..=6 => 2, // SPACE
-                    7 => 3,     // RIGHT
-                    8 => 4,     // CLR
-                    _ => 5,     // ENTER
-                };
-            } else if old_row == 4 {
-                self.col = match self.col {
+            self.col = match (old_row, new_row) {
+                (1, 0) => match self.col {
+                    0..=1 => 0,
+                    2..=6 => 1,
+                    _ => 2,
+                },
+                (0, 1) => match self.col {
                     0 => 0,
                     1 => 2,
-                    2 => 4,
-                    3 => 7,
-                    4 => 8,
                     _ => 9,
-                };
-            }
-        } else {
+                },
+                (1, 2) => self.col.min(8),
+                (2, 1) => self.col,
+                (2, 3) => self.col,
+                (3, 2) => self.col,
+                (3, 4) => match self.col {
+                    0 => 0,
+                    1 => 1,
+                    2..=6 => 2,
+                    _ => 3,
+                },
+                (4, 3) => match self.col {
+                    0 => 0,
+                    1 => 1,
+                    2 => 4,
+                    _ => 8,
+                },
+                _ => self.col.min(Self::row_len(new_row) - 1),
+            };
+        } else if d_col != 0 {
             let len = Self::row_len(self.row) as isize;
             self.col = (self.col as isize + d_col).rem_euclid(len) as usize;
         }
     }
 
-    fn key_at(&self, r: usize, c: usize) -> &'static str {
-        const LOWER: [[&str; 10]; 4] = [
-            ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
-            ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
-            ["a", "s", "d", "f", "g", "h", "j", "k", "l", "-"],
-            ["SHIFT", "z", "x", "c", "v", "b", "n", "m", ".", "BKSP"],
-        ];
-        const UPPER: [[&str; 10]; 4] = [
-            ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
-            ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
-            ["A", "S", "D", "F", "G", "H", "J", "K", "L", "_"],
-            ["SHIFT", "Z", "X", "C", "V", "B", "N", "M", ",", "BKSP"],
-        ];
-        const SYM: [[&str; 10]; 4] = [
-            ["!", "@", "#", "$", "%", "^", "&", "*", "(", ")"],
-            ["~", "`", "|", "/", "\\", "=", "+", "[", "]", "?"],
-            [":", ";", "\"", "'", "<", ">", "{", "}", "_", "-"],
-            ["SHIFT", "€", "£", "₹", "©", "®", "°", "•", "…", "BKSP"],
-        ];
-        const BOTTOM: [&str; 6] = ["?!#", "◀", "SPACE", "▶", "CLR", "⏎"];
+    fn key_label(&self, r: usize, c: usize) -> &'static str {
+        const PILL: [&str; 3] = ["PREV", "NEXT", "DONE"];
 
-        if r == 4 {
-            return BOTTOM[c.min(5)];
-        }
-        match self.layer {
-            Layer::Lower => LOWER[r][c],
-            Layer::Upper => UPPER[r][c],
-            Layer::Symbols => SYM[r][c],
+        const ALPHA_R1: [&str; 10] = ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"];
+        const ALPHA_R2: [&str; 9] = ["A", "S", "D", "F", "G", "H", "J", "K", "L"];
+        const ALPHA_R3: [&str; 9] = ["SHIFT", "Z", "X", "C", "V", "B", "N", "M", "BKSP"];
+
+        const NUM_R1: [&str; 10] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
+        const NUM_R2: [&str; 9] = ["-", "/", ":", ";", "(", ")", "$", "&", "@"];
+        const NUM_R3: [&str; 9] = ["SHIFT", ".", ",", "?", "!", "'", "\"", "_", "BKSP"];
+
+        const SYM_R1: [&str; 10] = ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="];
+        const SYM_R2: [&str; 9] = ["_", "\\", "|", "~", "<", ">", "€", "£", "₹"];
+        const SYM_R3: [&str; 9] = ["SHIFT", ".", ",", "?", "!", "'", "\"", "•", "BKSP"];
+
+        match r {
+            0 => PILL[c.min(2)],
+            1 => match self.layer {
+                Layer::Lower | Layer::Upper => ALPHA_R1[c],
+                Layer::Numbers => NUM_R1[c],
+                Layer::Symbols => SYM_R1[c],
+            },
+            2 => match self.layer {
+                Layer::Lower | Layer::Upper => ALPHA_R2[c],
+                Layer::Numbers => NUM_R2[c],
+                Layer::Symbols => SYM_R2[c],
+            },
+            3 => match self.layer {
+                Layer::Lower | Layer::Upper => ALPHA_R3[c],
+                Layer::Numbers => NUM_R3[c],
+                Layer::Symbols => SYM_R3[c],
+            },
+            4 => match c {
+                0 => match self.layer {
+                    Layer::Numbers | Layer::Symbols => "ABC",
+                    _ => "123",
+                },
+                1 => "SYM",
+                2 => "SPACE",
+                _ => "ENTER",
+            },
+            _ => "",
         }
     }
 
     fn activate_current(&mut self) -> String {
-        let key = self.key_at(self.row, self.col);
+        let key = self.key_label(self.row, self.col);
         match key {
+            "PREV" => "CURSOR_LEFT".to_string(),
+            "NEXT" => "CURSOR_RIGHT".to_string(),
+            "DONE" => "HIDE".to_string(),
             "SHIFT" => {
                 self.layer = match self.layer {
                     Layer::Lower => Layer::Upper,
                     Layer::Upper => Layer::Lower,
-                    Layer::Symbols => Layer::Lower,
+                    Layer::Numbers => Layer::Symbols,
+                    Layer::Symbols => Layer::Numbers,
                 };
                 "REDRAW".to_string()
             }
-            "?!#" => {
+            "123" => {
+                self.layer = Layer::Numbers;
+                "REDRAW".to_string()
+            }
+            "ABC" => {
+                self.layer = Layer::Lower;
+                "REDRAW".to_string()
+            }
+            "SYM" => {
                 self.layer = match self.layer {
                     Layer::Symbols => Layer::Lower,
                     _ => Layer::Symbols,
@@ -145,29 +185,36 @@ impl KeyboardState {
             }
             "BKSP" => "BACKSPACE".to_string(),
             "SPACE" => "COMMIT: ".to_string(),
-            "◀" => "CURSOR_LEFT".to_string(),
-            "▶" => "CURSOR_RIGHT".to_string(),
-            "CLR" => "CLEAR".to_string(),
-            "⏎" => "SUBMIT".to_string(),
-            ch => format!("COMMIT:{}", ch),
+            "ENTER" => "SUBMIT".to_string(),
+            ch => {
+                let out = if self.layer == Layer::Lower {
+                    ch.to_ascii_lowercase()
+                } else {
+                    ch.to_string()
+                };
+                "COMMIT:".to_string() + &out
+            }
         }
     }
 
     fn serialize_grid(&self) -> String {
-        let mut out = format!("{},{}\n", self.row, self.col);
-        for r in 0..4 {
-            let mut row_items = Vec::with_capacity(10);
-            for c in 0..10 {
-                row_items.push(self.key_at(r, c));
+        let shift_active = if self.layer == Layer::Upper || self.layer == Layer::Symbols {
+            1
+        } else {
+            0
+        };
+        let mut out = format!("{},{},{}\n", self.row, self.col, shift_active);
+        for r in 0..=4 {
+            let len = Self::row_len(r);
+            let mut items = Vec::with_capacity(len);
+            for c in 0..len {
+                items.push(self.key_label(r, c));
             }
-            out.push_str(&row_items.join("\t"));
-            out.push('\n');
+            out.push_str(&items.join("\t"));
+            if r < 4 {
+                out.push('\n');
+            }
         }
-        let mut bot_items = Vec::with_capacity(6);
-        for c in 0..6 {
-            bot_items.push(self.key_at(4, c));
-        }
-        out.push_str(&bot_items.join("\t"));
         out
     }
 }
@@ -181,6 +228,7 @@ const KEYCODE_DPAD_RIGHT: jint = 22;
 const KEYCODE_DPAD_CENTER: jint = 23;
 const KEYCODE_ENTER: jint = 66;
 const KEYCODE_DEL: jint = 67;
+const KEYCODE_NUMPAD_ENTER: jint = 160;
 
 #[no_mangle]
 pub extern "system" fn Java_com_ferrostb_keyboard_FerroKeyboardService_nativeOnKey(
@@ -206,7 +254,7 @@ pub extern "system" fn Java_com_ferrostb_keyboard_FerroKeyboardService_nativeOnK
             state.move_cursor(0, 1);
             "REDRAW".to_string()
         }
-        KEYCODE_DPAD_CENTER | KEYCODE_ENTER => state.activate_current(),
+        KEYCODE_DPAD_CENTER | KEYCODE_ENTER | KEYCODE_NUMPAD_ENTER => state.activate_current(),
         KEYCODE_DEL => "BACKSPACE".to_string(),
         _ => "PASS".to_string(),
     };
@@ -227,8 +275,8 @@ pub extern "system" fn Java_com_ferrostb_keyboard_FerroKeyboardService_nativeGet
     "AndroidManifest.xml": r"""<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.ferrostb.keyboard"
-    android:versionCode="1"
-    android:versionName="1.0">
+    android:versionCode="2"
+    android:versionName="1.1">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="30" />
 
@@ -269,19 +317,17 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.inputmethodservice.InputMethodService;
-import android.text.InputType;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.Window;
 import android.view.inputmethod.EditorInfo;
-import android.view.inputmethod.ExtractedText;
-import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
 import android.widget.FrameLayout;
 
@@ -294,10 +340,78 @@ public class FerroKeyboardService extends InputMethodService {
     public static native String nativeGetGrid();
 
     private LiquidGlassView glassView;
+    private boolean keepKeyboardOpen = false;
+    private boolean allowHideWindow = false;
+    private InputConnection cachedIc = null;
 
     @Override
     public boolean onEvaluateFullscreenMode() {
         return false;
+    }
+
+    @Override
+    public boolean onEvaluateInputViewShown() {
+        if (keepKeyboardOpen) {
+            return true;
+        }
+        return super.onEvaluateInputViewShown();
+    }
+
+    @Override
+    public boolean onShowInputRequested(int flags, boolean configChange) {
+        keepKeyboardOpen = true;
+        allowHideWindow = false;
+        return true;
+    }
+
+    @Override
+    public void onWindowShown() {
+        super.onWindowShown();
+        keepKeyboardOpen = true;
+        allowHideWindow = false;
+        InputConnection ic = getCurrentInputConnection();
+        if (ic != null) {
+            cachedIc = ic;
+        }
+        if (glassView != null) {
+            glassView.invalidate();
+        }
+    }
+
+    @Override
+    public void onStartInput(EditorInfo attribute, boolean restarting) {
+        super.onStartInput(attribute, restarting);
+        InputConnection ic = getCurrentInputConnection();
+        if (ic != null && attribute != null && attribute.inputType != 0) {
+            cachedIc = ic;
+        }
+    }
+
+    @Override
+    public void onFinishInputView(boolean finishingInput) {
+        if (!allowHideWindow && keepKeyboardOpen) {
+            // Prevent Koji Browser from auto-closing the keyboard when focus shifts
+            return;
+        }
+        super.onFinishInputView(finishingInput);
+    }
+
+    @Override
+    public void hideWindow() {
+        if (keepKeyboardOpen && !allowHideWindow) {
+            // Keep floating keyboard pinned until user presses Back, Checkmark, or Enter
+            return;
+        }
+        keepKeyboardOpen = false;
+        allowHideWindow = false;
+        super.hideWindow();
+    }
+
+    private void dismissKeyboardExplicitly() {
+        keepKeyboardOpen = false;
+        allowHideWindow = true;
+        requestHideSelf(0);
+        super.hideWindow();
     }
 
     @Override
@@ -324,9 +438,9 @@ public class FerroKeyboardService extends InputMethodService {
         int screenW = getResources().getDisplayMetrics().widthPixels;
         int screenH = getResources().getDisplayMetrics().heightPixels;
 
-        int cardW = (int) (screenW * 0.56f);
-        int cardH = (int) (screenH * 0.38f);
-        int bottomMargin = (int) (screenH * 0.045f);
+        int cardW = (int) (screenW * 0.46f);
+        int cardH = (int) (screenH * 0.49f);
+        int bottomMargin = (int) (screenH * 0.035f);
 
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(cardW, cardH);
         params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
@@ -337,24 +451,48 @@ public class FerroKeyboardService extends InputMethodService {
         return container;
     }
 
+    private boolean isDpadOrImeKey(int keyCode) {
+        return keyCode == KeyEvent.KEYCODE_DPAD_UP
+                || keyCode == KeyEvent.KEYCODE_DPAD_DOWN
+                || keyCode == KeyEvent.KEYCODE_DPAD_LEFT
+                || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+                || keyCode == KeyEvent.KEYCODE_DPAD_CENTER
+                || keyCode == KeyEvent.KEYCODE_ENTER
+                || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+                || keyCode == KeyEvent.KEYCODE_DEL;
+    }
+
+    private InputConnection activeConnection() {
+        InputConnection ic = getCurrentInputConnection();
+        return (ic != null) ? ic : cachedIc;
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        EditorInfo info = getCurrentInputEditorInfo();
-        if (!isInputViewShown() || info == null || info.inputType == InputType.TYPE_NULL) {
+        if (!keepKeyboardOpen && !isInputViewShown()) {
             return super.onKeyDown(keyCode, event);
         }
 
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            requestHideSelf(0);
+            dismissKeyboardExplicitly();
             return true;
+        }
+
+        if (!isDpadOrImeKey(keyCode)) {
+            return super.onKeyDown(keyCode, event);
         }
 
         String action = nativeOnKey(keyCode);
         if ("PASS".equals(action)) {
-            return super.onKeyDown(keyCode, event);
+            return true;
         }
 
-        InputConnection ic = getCurrentInputConnection();
+        if ("HIDE".equals(action)) {
+            dismissKeyboardExplicitly();
+            return true;
+        }
+
+        InputConnection ic = activeConnection();
         if (ic != null) {
             if (action.startsWith("COMMIT:")) {
                 ic.commitText(action.substring(7), 1);
@@ -366,20 +504,18 @@ public class FerroKeyboardService extends InputMethodService {
             } else if ("CURSOR_RIGHT".equals(action)) {
                 ic.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT));
                 ic.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_RIGHT));
-            } else if ("CLEAR".equals(action)) {
-                ExtractedText et = ic.getExtractedText(new ExtractedTextRequest(), 0);
-                if (et != null && et.text != null) {
-                    ic.setSelection(0, et.text.length());
-                    ic.commitText("", 1);
-                }
             } else if ("SUBMIT".equals(action)) {
-                int actionId = info.imeOptions & EditorInfo.IME_MASK_ACTION;
-                if (actionId != EditorInfo.IME_ACTION_NONE) {
+                EditorInfo info = getCurrentInputEditorInfo();
+                int actionId = (info != null) ? (info.imeOptions & EditorInfo.IME_MASK_ACTION) : EditorInfo.IME_ACTION_NONE;
+                if (actionId != EditorInfo.IME_ACTION_NONE && actionId != EditorInfo.IME_ACTION_UNSPECIFIED) {
                     ic.performEditorAction(actionId);
                 } else {
                     ic.performEditorAction(EditorInfo.IME_ACTION_SEARCH);
+                    ic.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
+                    ic.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
                 }
-                requestHideSelf(0);
+                dismissKeyboardExplicitly();
+                return true;
             }
         }
 
@@ -389,126 +525,399 @@ public class FerroKeyboardService extends InputMethodService {
         return true;
     }
 
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keepKeyboardOpen || isInputViewShown()) {
+            if (keyCode == KeyEvent.KEYCODE_BACK || isDpadOrImeKey(keyCode)) {
+                // Consume ACTION_UP so Koji Browser never moves page focus on key release
+                return true;
+            }
+        }
+        return super.onKeyUp(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyLongPress(int keyCode, KeyEvent event) {
+        if ((keepKeyboardOpen || isInputViewShown()) && isDpadOrImeKey(keyCode)) {
+            return true;
+        }
+        return super.onKeyLongPress(keyCode, event);
+    }
+
     private static class LiquidGlassView extends View {
+        private final Paint pillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint pillRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint rimOuterPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint rimInnerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint cardRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint keyPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint keyBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint keyTopRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint focusPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint focusRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint shiftActivePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint subTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint footerIconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
+        private final Path path = new Path();
 
         public LiquidGlassView(Context context) {
             super(context);
             setLayerType(LAYER_TYPE_SOFTWARE, null);
 
-            rimOuterPaint.setStyle(Paint.Style.STROKE);
-            rimOuterPaint.setStrokeWidth(2.2f);
+            pillRimPaint.setStyle(Paint.Style.STROKE);
+            pillRimPaint.setStrokeWidth(1.6f);
 
-            rimInnerPaint.setStyle(Paint.Style.STROKE);
-            rimInnerPaint.setStrokeWidth(1.2f);
-            rimInnerPaint.setColor(0x38FFFFFF);
+            cardRimPaint.setStyle(Paint.Style.STROKE);
+            cardRimPaint.setStrokeWidth(1.8f);
 
-            keyBorderPaint.setStyle(Paint.Style.STROKE);
-            keyBorderPaint.setStrokeWidth(1.3f);
-            keyBorderPaint.setColor(0x40FFFFFF);
+            keyTopRimPaint.setStyle(Paint.Style.STROKE);
+            keyTopRimPaint.setStrokeWidth(1.1f);
+            keyTopRimPaint.setColor(0x30FFFFFF);
 
             focusRimPaint.setStyle(Paint.Style.STROKE);
-            focusRimPaint.setStrokeWidth(2.5f);
-            focusRimPaint.setColor(0xEEBAE6FD);
+            focusRimPaint.setStrokeWidth(2.2f);
+            focusRimPaint.setColor(0xF0FFFFFF);
+
+            shiftActivePaint.setColor(0xEEFFFFFF);
 
             textPaint.setColor(0xFFF8FAFC);
             textPaint.setTextAlign(Paint.Align.CENTER);
-            textPaint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            textPaint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+
+            subTextPaint.setColor(0x88E2E8F0);
+            subTextPaint.setTextAlign(Paint.Align.RIGHT);
+            subTextPaint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+
+            iconPaint.setStyle(Paint.Style.STROKE);
+            iconPaint.setStrokeCap(Paint.Cap.ROUND);
+            iconPaint.setStrokeJoin(Paint.Join.ROUND);
+
+            footerIconPaint.setStyle(Paint.Style.STROKE);
+            footerIconPaint.setStrokeWidth(2.0f);
+            footerIconPaint.setColor(0xCCFFFFFF);
+            footerIconPaint.setStrokeCap(Paint.Cap.ROUND);
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
-            float w = getWidth();
-            float h = getHeight();
-            float pad = 14f;
-
-            rect.set(pad, pad, w - pad, h - pad);
-            cardPaint.setShader(new LinearGradient(
-                    0, pad, 0, h - pad,
-                    new int[]{0xCC1E293B, 0xB80F172A, 0xCC090D16},
-                    new float[]{0f, 0.55f, 1f},
-                    Shader.TileMode.CLAMP
-            ));
-            cardPaint.setShadowLayer(18f, 0f, 8f, 0x99000000);
-            canvas.drawRoundRect(rect, 32f, 32f, cardPaint);
-
-            rimOuterPaint.setShader(new LinearGradient(
-                    0, pad, w, h - pad,
-                    new int[]{0xAAFFFFFF, 0x5538BDF8, 0x22FFFFFF, 0x7738BDF8},
-                    null,
-                    Shader.TileMode.CLAMP
-            ));
-            canvas.drawRoundRect(rect, 32f, 32f, rimOuterPaint);
-
-            rect.inset(3f, 3f);
-            canvas.drawRoundRect(rect, 29f, 29f, rimInnerPaint);
-
             String raw = nativeGetGrid();
             String[] lines = raw.split("\n");
             if (lines.length < 6) return;
 
-            String[] coords = lines[0].split(",");
-            int focusRow = Integer.parseInt(coords[0]);
-            int focusCol = Integer.parseInt(coords[1]);
+            String[] header = lines[0].split(",");
+            int focusRow = Integer.parseInt(header[0]);
+            int focusCol = Integer.parseInt(header[1]);
+            boolean shiftActive = Integer.parseInt(header[2]) == 1;
 
-            float innerPad = pad + 16f;
-            float availW = w - (innerPad * 2f);
-            float availH = h - (innerPad * 2f);
-            float rowH = availH / 5f;
-            float gap = 7f;
+            float w = getWidth();
+            float h = getHeight();
+            float outerPad = 10f;
 
-            textPaint.setTextSize(rowH * 0.34f);
+            // 1. Top Detached Liquid Glass Accessory Pill (matches screenshot)
+            float pillH = h * 0.125f;
+            float pillMarginX = outerPad + (w - outerPad * 2f) * 0.03f;
+            rect.set(pillMarginX, outerPad, w - pillMarginX, outerPad + pillH);
+            float pillRadius = pillH * 0.5f;
 
-            for (int r = 0; r < 5; r++) {
-                String[] keys = lines[r + 1].split("\t");
-                float yTop = innerPad + r * rowH + (gap * 0.5f);
-                float yBot = innerPad + (r + 1) * rowH - (gap * 0.5f);
+            pillPaint.setShader(new LinearGradient(
+                    0, rect.top, 0, rect.bottom,
+                    new int[]{0x991A2636, 0x880E1620},
+                    null,
+                    Shader.TileMode.CLAMP
+            ));
+            pillPaint.setShadowLayer(12f, 0f, 4f, 0x77000000);
+            canvas.drawRoundRect(rect, pillRadius, pillRadius, pillPaint);
 
-                float totalUnits = (r == 4) ? 10f : keys.length;
-                float unitW = availW / totalUnits;
-                float curX = innerPad;
+            pillRimPaint.setShader(new LinearGradient(
+                    rect.left, rect.top, rect.right, rect.bottom,
+                    new int[]{0x99FFFFFF, 0x33FFFFFF, 0x88FFFFFF},
+                    null,
+                    Shader.TileMode.CLAMP
+            ));
+            canvas.drawRoundRect(rect, pillRadius, pillRadius, pillRimPaint);
+
+            // Draw Pill Buttons: [^] [v] on left, [check] on right
+            float pillBtnW = pillH * 1.15f;
+            float pillCy = rect.centerY();
+            float[] pillCentersX = new float[]{
+                    rect.left + pillBtnW * 0.55f,
+                    rect.left + pillBtnW * 1.65f,
+                    rect.right - pillBtnW * 0.55f
+            };
+
+            for (int c = 0; c < 3; c++) {
+                float cx = pillCentersX[c];
+                boolean isFocused = (focusRow == 0 && focusCol == c);
+                rect.set(cx - pillBtnW * 0.45f, outerPad + 4f, cx + pillBtnW * 0.45f, outerPad + pillH - 4f);
+                if (isFocused) {
+                    focusPaint.setShader(new LinearGradient(
+                            rect.left, rect.top, rect.left, rect.bottom,
+                            0x66FFFFFF, 0x33FFFFFF, Shader.TileMode.CLAMP
+                    ));
+                    canvas.drawRoundRect(rect, pillRadius, pillRadius, focusPaint);
+                    canvas.drawRoundRect(rect, pillRadius, pillRadius, focusRimPaint);
+                } else if (c == 0) {
+                    keyPaint.setShader(new LinearGradient(
+                            rect.left, rect.top, rect.left, rect.bottom,
+                            0x28FFFFFF, 0x18FFFFFF, Shader.TileMode.CLAMP
+                    ));
+                    canvas.drawRoundRect(rect, pillRadius, pillRadius, keyPaint);
+                }
+
+                iconPaint.setStrokeWidth(2.4f);
+                iconPaint.setColor(isFocused ? 0xFFFFFFFF : 0xCCFFFFFF);
+                float s = pillH * 0.14f;
+                path.reset();
+                if (c == 0) {
+                    // Up/Prev chevron (^)
+                    path.moveTo(cx - s * 1.2f, pillCy + s * 0.45f);
+                    path.lineTo(cx, pillCy - s * 0.65f);
+                    path.lineTo(cx + s * 1.2f, pillCy + s * 0.45f);
+                } else if (c == 1) {
+                    // Down/Next chevron (v)
+                    path.moveTo(cx - s * 1.2f, pillCy - s * 0.45f);
+                    path.lineTo(cx, pillCy + s * 0.65f);
+                    path.lineTo(cx + s * 1.2f, pillCy - s * 0.45f);
+                } else {
+                    // Checkmark (✓)
+                    path.moveTo(cx - s * 1.2f, pillCy + s * 0.1f);
+                    path.lineTo(cx - s * 0.3f, pillCy + s * 0.95f);
+                    path.lineTo(cx + s * 1.35f, pillCy - s * 0.85f);
+                }
+                canvas.drawPath(path, iconPaint);
+            }
+
+            // 2. Main Dark Frosted Glass Keyboard Container
+            float cardTop = outerPad + pillH + (h * 0.024f);
+            float cardBot = h - outerPad;
+            rect.set(outerPad, cardTop, w - outerPad, cardBot);
+            float cardRadius = 38f;
+
+            cardPaint.setShader(new LinearGradient(
+                    0, cardTop, 0, cardBot,
+                    new int[]{0xD8101822, 0xE20A0F16, 0xEC06090E},
+                    new float[]{0f, 0.5f, 1f},
+                    Shader.TileMode.CLAMP
+            ));
+            cardPaint.setShadowLayer(18f, 0f, 8f, 0x99000000);
+            canvas.drawRoundRect(rect, cardRadius, cardRadius, cardPaint);
+
+            cardRimPaint.setShader(new LinearGradient(
+                    0, cardTop, w, cardBot,
+                    new int[]{0x77FFFFFF, 0x22FFFFFF, 0x44FFFFFF},
+                    null,
+                    Shader.TileMode.CLAMP
+            ));
+            canvas.drawRoundRect(rect, cardRadius, cardRadius, cardRimPaint);
+
+            // 3. Key Grid Area (4 Staggered Rows + Footer Bar)
+            float padX = outerPad + 12f;
+            float padTop = cardTop + 14f;
+            float footerH = (cardBot - cardTop) * 0.135f;
+            float gridH = (cardBot - footerH) - padTop;
+            float gridW = (w - outerPad * 2f) - 24f;
+
+            float rowH = gridH / 4f;
+            float unitW = gridW / 10f;
+            float gapX = 6.5f;
+            float gapY = 8.0f;
+            float keyCorner = 14f;
+
+            textPaint.setTextSize(rowH * 0.39f);
+            subTextPaint.setTextSize(rowH * 0.21f);
+
+            for (int r = 1; r <= 4; r++) {
+                String[] keys = lines[r].split("\t");
+                float yTop = padTop + (r - 1) * rowH + gapY * 0.5f;
+                float yBot = padTop + r * rowH - gapY * 0.5f;
 
                 for (int c = 0; c < keys.length; c++) {
-                    float span = (r == 4 && c == 2) ? 5f : 1f;
-                    float kW = unitW * span;
-                    rect.set(curX + gap * 0.5f, yTop, curX + kW - gap * 0.5f, yBot);
-                    curX += kW;
+                    float xLeft;
+                    float xRight;
 
+                    if (r == 1) {
+                        // Row 1: 10 equal keys (Q..P)
+                        xLeft = padX + c * unitW;
+                        xRight = xLeft + unitW;
+                    } else if (r == 2) {
+                        // Row 2: 9 keys indented by 0.5 unitW on left and right (A..L)
+                        xLeft = padX + (0.5f + c) * unitW;
+                        xRight = xLeft + unitW;
+                    } else if (r == 3) {
+                        // Row 3: [SHIFT (1.32u)] + gap + 7 keys (Z..M) + gap + [BKSP (1.32u)]
+                        if (c == 0) {
+                            xLeft = padX;
+                            xRight = padX + unitW * 1.32f;
+                        } else if (c == 8) {
+                            xRight = padX + gridW;
+                            xLeft = xRight - unitW * 1.32f;
+                        } else {
+                            xLeft = padX + (1.5f + (c - 1)) * unitW;
+                            xRight = xLeft + unitW;
+                        }
+                    } else {
+                        // Row 4: [123 (1.32u)] [SYM (1.18u)] [SPACE (5.0u)] [ENTER (2.5u)]
+                        if (c == 0) {
+                            xLeft = padX;
+                            xRight = padX + unitW * 1.32f;
+                        } else if (c == 1) {
+                            xLeft = padX + unitW * 1.32f;
+                            xRight = xLeft + unitW * 1.18f;
+                        } else if (c == 2) {
+                            xLeft = padX + unitW * 2.50f;
+                            xRight = xLeft + unitW * 5.00f;
+                        } else {
+                            xLeft = padX + unitW * 7.50f;
+                            xRight = padX + gridW;
+                        }
+                    }
+
+                    rect.set(xLeft + gapX * 0.5f, yTop, xRight - gapX * 0.5f, yBot);
+                    String label = keys[c];
                     boolean isFocused = (r == focusRow && c == focusCol);
+                    boolean isShiftKey = "SHIFT".equals(label);
+
                     if (isFocused) {
-                        rect.inset(-2f, -2f);
+                        rect.inset(-1.5f, -1.5f);
                         focusPaint.setShader(new LinearGradient(
                                 rect.left, rect.top, rect.left, rect.bottom,
-                                0x9938BDF8, 0x550284C7, Shader.TileMode.CLAMP
+                                0x68FFFFFF, 0x38FFFFFF, Shader.TileMode.CLAMP
                         ));
-                        focusPaint.setShadowLayer(14f, 0f, 3f, 0xAA38BDF8);
-                        canvas.drawRoundRect(rect, 18f, 18f, focusPaint);
-                        canvas.drawRoundRect(rect, 18f, 18f, focusRimPaint);
-                        textPaint.setColor(0xFFFFFFFF);
+                        focusPaint.setShadowLayer(10f, 0f, 2f, 0x55FFFFFF);
+                        canvas.drawRoundRect(rect, keyCorner, keyCorner, focusPaint);
+                        canvas.drawRoundRect(rect, keyCorner, keyCorner, focusRimPaint);
+                    } else if (isShiftKey && shiftActive) {
+                        canvas.drawRoundRect(rect, keyCorner, keyCorner, shiftActivePaint);
                     } else {
                         keyPaint.setShader(new LinearGradient(
                                 rect.left, rect.top, rect.left, rect.bottom,
-                                0x36FFFFFF, 0x12FFFFFF, Shader.TileMode.CLAMP
+                                0x38FFFFFF, 0x24FFFFFF, Shader.TileMode.CLAMP
                         ));
-                        canvas.drawRoundRect(rect, 15f, 15f, keyPaint);
-                        canvas.drawRoundRect(rect, 15f, 15f, keyBorderPaint);
-                        textPaint.setColor(0xFFE2E8F0);
+                        canvas.drawRoundRect(rect, keyCorner, keyCorner, keyPaint);
+                        canvas.drawRoundRect(rect, keyCorner, keyCorner, keyTopRimPaint);
                     }
 
-                    Paint.FontMetrics fm = textPaint.getFontMetrics();
-                    float textY = rect.centerY() - (fm.ascent + fm.descent) / 2f;
-                    canvas.drawText(keys[c], rect.centerX(), textY, textPaint);
+                    float cx = rect.centerX();
+                    float cy = rect.centerY();
+
+                    if ("SHIFT".equals(label)) {
+                        drawShiftIcon(canvas, cx, cy, rowH * 0.22f, (isShiftKey && shiftActive && !isFocused) ? 0xFF0F172A : 0xFFFFFFFF);
+                    } else if ("BKSP".equals(label)) {
+                        drawBackspaceIcon(canvas, cx, cy, rowH * 0.22f, 0xFFFFFFFF);
+                    } else if ("SYM".equals(label)) {
+                        drawSmileyIcon(canvas, cx, cy, rowH * 0.22f, 0xFFFFFFFF);
+                    } else if ("ENTER".equals(label)) {
+                        drawReturnIcon(canvas, cx, cy, rowH * 0.22f, 0xFFFFFFFF);
+                    } else if ("SPACE".equals(label)) {
+                        String badge = shiftActive ? "CAPS" : "EN";
+                        canvas.drawText(badge, rect.right - 10f, rect.bottom - 8f, subTextPaint);
+                    } else {
+                        if ("123".equals(label) || "ABC".equals(label)) {
+                            textPaint.setTextSize(rowH * 0.31f);
+                        } else {
+                            textPaint.setTextSize(rowH * 0.39f);
+                        }
+                        Paint.FontMetrics fm = textPaint.getFontMetrics();
+                        float textY = cy - (fm.ascent + fm.descent) / 2f;
+                        canvas.drawText(label, cx, textY, textPaint);
+                    }
                 }
             }
+
+            // 4. Bottom Footer Icons (Globe on Left, Mic on Right — matches screenshot)
+            float footerCy = cardBot - footerH * 0.52f;
+            float globeCx = padX + unitW * 0.85f;
+            float micCx = padX + gridW - unitW * 0.65f;
+            float iconR = footerH * 0.27f;
+
+            drawGlobeIcon(canvas, globeCx, footerCy, iconR);
+            drawMicIcon(canvas, micCx, footerCy, iconR);
+        }
+
+        private void drawShiftIcon(Canvas canvas, float cx, float cy, float s, int color) {
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(color);
+            path.reset();
+            path.moveTo(cx, cy - s * 0.95f);
+            path.lineTo(cx + s * 0.95f, cy + s * 0.05f);
+            path.lineTo(cx + s * 0.42f, cy + s * 0.05f);
+            path.lineTo(cx + s * 0.42f, cy + s * 0.85f);
+            path.lineTo(cx - s * 0.42f, cy + s * 0.85f);
+            path.lineTo(cx - s * 0.42f, cy + s * 0.05f);
+            path.lineTo(cx - s * 0.95f, cy + s * 0.05f);
+            path.close();
+            canvas.drawPath(path, p);
+        }
+
+        private void drawBackspaceIcon(Canvas canvas, float cx, float cy, float s, int color) {
+            iconPaint.setStrokeWidth(2.2f);
+            iconPaint.setColor(color);
+            path.reset();
+            path.moveTo(cx - s * 1.15f, cy);
+            path.lineTo(cx - s * 0.45f, cy - s * 0.72f);
+            path.lineTo(cx + s * 1.05f, cy - s * 0.72f);
+            path.lineTo(cx + s * 1.05f, cy + s * 0.72f);
+            path.lineTo(cx - s * 0.45f, cy + s * 0.72f);
+            path.close();
+            canvas.drawPath(path, iconPaint);
+
+            float xOff = cx + s * 0.25f;
+            float d = s * 0.32f;
+            canvas.drawLine(xOff - d, cy - d, xOff + d, cy + d, iconPaint);
+            canvas.drawLine(xOff + d, cy - d, xOff - d, cy + d, iconPaint);
+        }
+
+        private void drawSmileyIcon(Canvas canvas, float cx, float cy, float s, int color) {
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(color);
+            canvas.drawCircle(cx, cy, s * 0.95f, p);
+
+            p.setColor(0xFF1E293B);
+            canvas.drawCircle(cx - s * 0.33f, cy - s * 0.22f, s * 0.13f, p);
+            canvas.drawCircle(cx + s * 0.33f, cy - s * 0.22f, s * 0.13f, p);
+
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(2.0f);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            rect.set(cx - s * 0.48f, cy - s * 0.32f, cx + s * 0.48f, cy + s * 0.52f);
+            canvas.drawArc(rect, 20f, 140f, false, p);
+        }
+
+        private void drawReturnIcon(Canvas canvas, float cx, float cy, float s, int color) {
+            iconPaint.setStrokeWidth(2.3f);
+            iconPaint.setColor(color);
+            path.reset();
+            path.moveTo(cx + s * 0.95f, cy - s * 0.55f);
+            path.lineTo(cx + s * 0.95f, cy + s * 0.25f);
+            path.lineTo(cx - s * 0.95f, cy + s * 0.25f);
+            canvas.drawPath(path, iconPaint);
+
+            path.reset();
+            path.moveTo(cx - s * 0.45f, cy - s * 0.22f);
+            path.lineTo(cx - s * 0.95f, cy + s * 0.25f);
+            path.lineTo(cx - s * 0.45f, cy + s * 0.72f);
+            canvas.drawPath(path, iconPaint);
+        }
+
+        private void drawGlobeIcon(Canvas canvas, float cx, float cy, float r) {
+            canvas.drawCircle(cx, cy, r, footerIconPaint);
+            rect.set(cx - r * 0.52f, cy - r, cx + r * 0.52f, cy + r);
+            canvas.drawOval(rect, footerIconPaint);
+            canvas.drawLine(cx - r, cy, cx + r, cy, footerIconPaint);
+            canvas.drawLine(cx, cy - r, cx, cy + r, footerIconPaint);
+        }
+
+        private void drawMicIcon(Canvas canvas, float cx, float cy, float r) {
+            rect.set(cx - r * 0.38f, cy - r * 0.95f, cx + r * 0.38f, cy + r * 0.15f);
+            canvas.drawRoundRect(rect, r * 0.38f, r * 0.38f, footerIconPaint);
+            rect.set(cx - r * 0.72f, cy - r * 0.55f, cx + r * 0.72f, cy + r * 0.52f);
+            canvas.drawArc(rect, 0f, 180f, false, footerIconPaint);
+            canvas.drawLine(cx, cy + r * 0.52f, cx, cy + r * 0.95f, footerIconPaint);
+            canvas.drawLine(cx - r * 0.42f, cy + r * 0.95f, cx + r * 0.42f, cy + r * 0.95f, footerIconPaint);
         }
     }
 }
@@ -552,7 +961,6 @@ jobs:
 
           mkdir -p build/classes build/apk/lib/armeabi-v7a build/apk/lib/arm64-v8a
 
-          # 1. Compile XML resources & link base APK
           "$BT/aapt2" compile res/xml/method.xml -o build/
           "$BT/aapt2" link -o build/unsigned.apk \
             -I "$PLATFORM/android.jar" \
@@ -560,7 +968,6 @@ jobs:
             --java build/classes \
             build/xml_method.xml.flat
 
-          # 2. Compile Java shim to DEX
           javac -source 1.8 -target 1.8 \
             -bootclasspath "$PLATFORM/android.jar" \
             -d build/classes \
@@ -571,7 +978,6 @@ jobs:
             --output build/apk \
             $(find build/classes -name "*.class")
 
-          # 3. Bundle DEX + Rust native libraries into APK
           cp jniLibs/armeabi-v7a/libferrokey.so build/apk/lib/armeabi-v7a/
           cp jniLibs/arm64-v8a/libferrokey.so build/apk/lib/arm64-v8a/
 
@@ -580,7 +986,6 @@ jobs:
           zip -u -0 -r ../unsigned.apk lib/
           cd ../..
 
-          # 4. Align & Sign APK
           "$BT/zipalign" -f -p 4 build/unsigned.apk build/aligned.apk
 
           keytool -genkey -v \
@@ -612,4 +1017,4 @@ for path, content in FILES.items():
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(content.strip() + "\n")
 
-print("[+] FerroKey Liquid Glass + GitHub Actions workflow (with Rust Cache) generated!")
+print("[+] FerroKey v0.2 (iOS Liquid Glass UI + Koji Browser Focus Lock) generated!")

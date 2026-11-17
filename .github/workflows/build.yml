@@ -36,7 +36,6 @@ jobs:
 
           mkdir -p build/classes build/apk/lib/armeabi-v7a build/apk/lib/arm64-v8a
 
-          # 1. Compile XML resources & link base APK
           "$BT/aapt2" compile res/xml/method.xml -o build/
           "$BT/aapt2" link -o build/unsigned.apk \
             -I "$PLATFORM/android.jar" \
@@ -44,7 +43,6 @@ jobs:
             --java build/classes \
             build/xml_method.xml.flat
 
-          # 2. Compile Java shim to DEX
           javac -source 1.8 -target 1.8 \
             -bootclasspath "$PLATFORM/android.jar" \
             -d build/classes \
@@ -55,7 +53,6 @@ jobs:
             --output build/apk \
             $(find build/classes -name "*.class")
 
-          # 3. Bundle DEX + Rust native libraries into APK
           cp jniLibs/armeabi-v7a/libferrokey.so build/apk/lib/armeabi-v7a/
           cp jniLibs/arm64-v8a/libferrokey.so build/apk/lib/arm64-v8a/
 
@@ -64,7 +61,6 @@ jobs:
           zip -u -0 -r ../unsigned.apk lib/
           cd ../..
 
-          # 4. Align & Sign APK
           "$BT/zipalign" -f -p 4 build/unsigned.apk build/aligned.apk
 
           keytool -genkey -v \
