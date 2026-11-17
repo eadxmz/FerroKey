@@ -78,7 +78,6 @@ public class FerroKeyboardService extends InputMethodService {
     @Override
     public void onFinishInputView(boolean finishingInput) {
         if (!allowHideWindow && keepKeyboardOpen) {
-            // Prevent Koji Browser from auto-closing the keyboard when focus shifts
             return;
         }
         super.onFinishInputView(finishingInput);
@@ -87,7 +86,6 @@ public class FerroKeyboardService extends InputMethodService {
     @Override
     public void hideWindow() {
         if (keepKeyboardOpen && !allowHideWindow) {
-            // Keep floating keyboard pinned until user presses Back, Checkmark, or Enter
             return;
         }
         keepKeyboardOpen = false;
@@ -126,9 +124,10 @@ public class FerroKeyboardService extends InputMethodService {
         int screenW = getResources().getDisplayMetrics().widthPixels;
         int screenH = getResources().getDisplayMetrics().heightPixels;
 
-        int cardW = (int) (screenW * 0.46f);
-        int cardH = (int) (screenH * 0.49f);
-        int bottomMargin = (int) (screenH * 0.035f);
+        // Wide TV-scaled floating container (64% width, 45% height)
+        int cardW = (int) (screenW * 0.64f);
+        int cardH = (int) (screenH * 0.45f);
+        int bottomMargin = (int) (screenH * 0.03f);
 
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(cardW, cardH);
         params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
@@ -217,7 +216,6 @@ public class FerroKeyboardService extends InputMethodService {
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (keepKeyboardOpen || isInputViewShown()) {
             if (keyCode == KeyEvent.KEYCODE_BACK || isDpadOrImeKey(keyCode)) {
-                // Consume ACTION_UP so Koji Browser never moves page focus on key release
                 return true;
             }
         }
@@ -245,7 +243,6 @@ public class FerroKeyboardService extends InputMethodService {
         private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint subTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint footerIconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
         private final Path path = new Path();
 
@@ -260,12 +257,12 @@ public class FerroKeyboardService extends InputMethodService {
             cardRimPaint.setStrokeWidth(1.8f);
 
             keyTopRimPaint.setStyle(Paint.Style.STROKE);
-            keyTopRimPaint.setStrokeWidth(1.1f);
-            keyTopRimPaint.setColor(0x30FFFFFF);
+            keyTopRimPaint.setStrokeWidth(1.2f);
+            keyTopRimPaint.setColor(0x35FFFFFF);
 
             focusRimPaint.setStyle(Paint.Style.STROKE);
-            focusRimPaint.setStrokeWidth(2.2f);
-            focusRimPaint.setColor(0xF0FFFFFF);
+            focusRimPaint.setStrokeWidth(2.4f);
+            focusRimPaint.setColor(0xFFFFFFFF);
 
             shiftActivePaint.setColor(0xEEFFFFFF);
 
@@ -273,18 +270,13 @@ public class FerroKeyboardService extends InputMethodService {
             textPaint.setTextAlign(Paint.Align.CENTER);
             textPaint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
 
-            subTextPaint.setColor(0x88E2E8F0);
+            subTextPaint.setColor(0x99E2E8F0);
             subTextPaint.setTextAlign(Paint.Align.RIGHT);
             subTextPaint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
 
             iconPaint.setStyle(Paint.Style.STROKE);
             iconPaint.setStrokeCap(Paint.Cap.ROUND);
             iconPaint.setStrokeJoin(Paint.Join.ROUND);
-
-            footerIconPaint.setStyle(Paint.Style.STROKE);
-            footerIconPaint.setStrokeWidth(2.0f);
-            footerIconPaint.setColor(0xCCFFFFFF);
-            footerIconPaint.setStrokeCap(Paint.Cap.ROUND);
         }
 
         @Override
@@ -297,21 +289,22 @@ public class FerroKeyboardService extends InputMethodService {
             String[] header = lines[0].split(",");
             int focusRow = Integer.parseInt(header[0]);
             int focusCol = Integer.parseInt(header[1]);
-            boolean shiftActive = Integer.parseInt(header[2]) == 1;
+            int layerId = Integer.parseInt(header[2]);
+            boolean shiftActive = (layerId == 1);
 
             float w = getWidth();
             float h = getHeight();
             float outerPad = 10f;
 
-            // 1. Top Detached Liquid Glass Accessory Pill (matches screenshot)
-            float pillH = h * 0.125f;
-            float pillMarginX = outerPad + (w - outerPad * 2f) * 0.03f;
+            // 1. Top Detached Liquid Glass Accessory Pill (focusRow == 0)
+            float pillH = h * 0.13f;
+            float pillMarginX = outerPad + (w - outerPad * 2f) * 0.02f;
             rect.set(pillMarginX, outerPad, w - pillMarginX, outerPad + pillH);
             float pillRadius = pillH * 0.5f;
 
             pillPaint.setShader(new LinearGradient(
                     0, rect.top, 0, rect.bottom,
-                    new int[]{0x991A2636, 0x880E1620},
+                    new int[]{0xA81A2636, 0x960E1620},
                     null,
                     Shader.TileMode.CLAMP
             ));
@@ -326,8 +319,7 @@ public class FerroKeyboardService extends InputMethodService {
             ));
             canvas.drawRoundRect(rect, pillRadius, pillRadius, pillRimPaint);
 
-            // Draw Pill Buttons: [^] [v] on left, [check] on right
-            float pillBtnW = pillH * 1.15f;
+            float pillBtnW = pillH * 1.35f;
             float pillCy = rect.centerY();
             float[] pillCentersX = new float[]{
                     rect.left + pillBtnW * 0.55f,
@@ -342,7 +334,7 @@ public class FerroKeyboardService extends InputMethodService {
                 if (isFocused) {
                     focusPaint.setShader(new LinearGradient(
                             rect.left, rect.top, rect.left, rect.bottom,
-                            0x66FFFFFF, 0x33FFFFFF, Shader.TileMode.CLAMP
+                            0x77FFFFFF, 0x44FFFFFF, Shader.TileMode.CLAMP
                     ));
                     canvas.drawRoundRect(rect, pillRadius, pillRadius, focusPaint);
                     canvas.drawRoundRect(rect, pillRadius, pillRadius, focusRimPaint);
@@ -354,9 +346,9 @@ public class FerroKeyboardService extends InputMethodService {
                     canvas.drawRoundRect(rect, pillRadius, pillRadius, keyPaint);
                 }
 
-                iconPaint.setStrokeWidth(2.4f);
+                iconPaint.setStrokeWidth(2.6f);
                 iconPaint.setColor(isFocused ? 0xFFFFFFFF : 0xCCFFFFFF);
-                float s = pillH * 0.14f;
+                float s = pillH * 0.16f;
                 path.reset();
                 if (c == 0) {
                     // Up/Prev chevron (^)
@@ -369,7 +361,7 @@ public class FerroKeyboardService extends InputMethodService {
                     path.lineTo(cx, pillCy + s * 0.65f);
                     path.lineTo(cx + s * 1.2f, pillCy - s * 0.45f);
                 } else {
-                    // Checkmark (✓)
+                    // Done Checkmark (✓)
                     path.moveTo(cx - s * 1.2f, pillCy + s * 0.1f);
                     path.lineTo(cx - s * 0.3f, pillCy + s * 0.95f);
                     path.lineTo(cx + s * 1.35f, pillCy - s * 0.85f);
@@ -377,15 +369,15 @@ public class FerroKeyboardService extends InputMethodService {
                 canvas.drawPath(path, iconPaint);
             }
 
-            // 2. Main Dark Frosted Glass Keyboard Container
-            float cardTop = outerPad + pillH + (h * 0.024f);
+            // 2. Main Dark Frosted Glass Keyboard Card
+            float cardTop = outerPad + pillH + (h * 0.025f);
             float cardBot = h - outerPad;
             rect.set(outerPad, cardTop, w - outerPad, cardBot);
-            float cardRadius = 38f;
+            float cardRadius = 34f;
 
             cardPaint.setShader(new LinearGradient(
                     0, cardTop, 0, cardBot,
-                    new int[]{0xD8101822, 0xE20A0F16, 0xEC06090E},
+                    new int[]{0xDC101822, 0xE60A0F16, 0xF006090E},
                     new float[]{0f, 0.5f, 1f},
                     Shader.TileMode.CLAMP
             ));
@@ -400,62 +392,63 @@ public class FerroKeyboardService extends InputMethodService {
             ));
             canvas.drawRoundRect(rect, cardRadius, cardRadius, cardRimPaint);
 
-            // 3. Key Grid Area (4 Staggered Rows + Footer Bar)
-            float padX = outerPad + 12f;
-            float padTop = cardTop + 14f;
-            float footerH = (cardBot - cardTop) * 0.135f;
-            float gridH = (cardBot - footerH) - padTop;
-            float gridW = (w - outerPad * 2f) - 24f;
+            // 3. Key Grid Area (Rows 1..4 map to lines[2..5])
+            float padX = outerPad + 16f;
+            float padY = 14f;
+            float gridTop = cardTop + padY;
+            float gridBot = cardBot - padY;
+            float gridH = gridBot - gridTop;
+            float gridW = (w - outerPad * 2f) - 32f;
 
             float rowH = gridH / 4f;
             float unitW = gridW / 10f;
-            float gapX = 6.5f;
-            float gapY = 8.0f;
-            float keyCorner = 14f;
+            float gapX = 8.0f;
+            float gapY = 8.5f;
+            float keyCorner = 15f;
 
-            textPaint.setTextSize(rowH * 0.39f);
-            subTextPaint.setTextSize(rowH * 0.21f);
+            subTextPaint.setTextSize(rowH * 0.22f);
 
             for (int r = 1; r <= 4; r++) {
-                String[] keys = lines[r].split("\t");
-                float yTop = padTop + (r - 1) * rowH + gapY * 0.5f;
-                float yBot = padTop + r * rowH - gapY * 0.5f;
+                // FIXED: lines[r + 1] maps r=1..4 to Rust rows 1..4
+                String[] keys = lines[r + 1].split("\t");
+                float yTop = gridTop + (r - 1) * rowH + gapY * 0.5f;
+                float yBot = gridTop + r * rowH - gapY * 0.5f;
 
                 for (int c = 0; c < keys.length; c++) {
                     float xLeft;
                     float xRight;
 
                     if (r == 1) {
-                        // Row 1: 10 equal keys (Q..P)
+                        // Row 1: 10 equal keys (Q..P or 1..0)
                         xLeft = padX + c * unitW;
                         xRight = xLeft + unitW;
                     } else if (r == 2) {
-                        // Row 2: 9 keys indented by 0.5 unitW on left and right (A..L)
+                        // Row 2: 9 keys indented by 0.5u on both sides (A..L)
                         xLeft = padX + (0.5f + c) * unitW;
                         xRight = xLeft + unitW;
                     } else if (r == 3) {
-                        // Row 3: [SHIFT (1.32u)] + gap + 7 keys (Z..M) + gap + [BKSP (1.32u)]
+                        // Row 3: [SHIFT/#+= (1.35u)] + 7 keys (Z..M) + [BKSP (1.35u)]
                         if (c == 0) {
                             xLeft = padX;
-                            xRight = padX + unitW * 1.32f;
+                            xRight = padX + unitW * 1.35f;
                         } else if (c == 8) {
                             xRight = padX + gridW;
-                            xLeft = xRight - unitW * 1.32f;
+                            xLeft = xRight - unitW * 1.35f;
                         } else {
                             xLeft = padX + (1.5f + (c - 1)) * unitW;
                             xRight = xLeft + unitW;
                         }
                     } else {
-                        // Row 4: [123 (1.32u)] [SYM (1.18u)] [SPACE (5.0u)] [ENTER (2.5u)]
+                        // Row 4: [123/ABC (1.35u)] [#+= (1.35u)] [SPACE (4.8u)] [ENTER (2.5u)]
                         if (c == 0) {
                             xLeft = padX;
-                            xRight = padX + unitW * 1.32f;
+                            xRight = padX + unitW * 1.35f;
                         } else if (c == 1) {
-                            xLeft = padX + unitW * 1.32f;
-                            xRight = xLeft + unitW * 1.18f;
+                            xLeft = padX + unitW * 1.35f;
+                            xRight = padX + unitW * 2.70f;
                         } else if (c == 2) {
-                            xLeft = padX + unitW * 2.50f;
-                            xRight = xLeft + unitW * 5.00f;
+                            xLeft = padX + unitW * 2.70f;
+                            xRight = padX + unitW * 7.50f;
                         } else {
                             xLeft = padX + unitW * 7.50f;
                             xRight = padX + gridW;
@@ -463,17 +456,18 @@ public class FerroKeyboardService extends InputMethodService {
                     }
 
                     rect.set(xLeft + gapX * 0.5f, yTop, xRight - gapX * 0.5f, yBot);
-                    String label = keys[c];
+                    String rawLabel = keys[c];
+                    String label = rawLabel.replace("_L", "");
                     boolean isFocused = (r == focusRow && c == focusCol);
                     boolean isShiftKey = "SHIFT".equals(label);
 
                     if (isFocused) {
-                        rect.inset(-1.5f, -1.5f);
+                        rect.inset(-1.8f, -1.8f);
                         focusPaint.setShader(new LinearGradient(
                                 rect.left, rect.top, rect.left, rect.bottom,
-                                0x68FFFFFF, 0x38FFFFFF, Shader.TileMode.CLAMP
+                                0x70FFFFFF, 0x40FFFFFF, Shader.TileMode.CLAMP
                         ));
-                        focusPaint.setShadowLayer(10f, 0f, 2f, 0x55FFFFFF);
+                        focusPaint.setShadowLayer(12f, 0f, 3f, 0x66FFFFFF);
                         canvas.drawRoundRect(rect, keyCorner, keyCorner, focusPaint);
                         canvas.drawRoundRect(rect, keyCorner, keyCorner, focusRimPaint);
                     } else if (isShiftKey && shiftActive) {
@@ -481,7 +475,7 @@ public class FerroKeyboardService extends InputMethodService {
                     } else {
                         keyPaint.setShader(new LinearGradient(
                                 rect.left, rect.top, rect.left, rect.bottom,
-                                0x38FFFFFF, 0x24FFFFFF, Shader.TileMode.CLAMP
+                                0x3AFFFFFF, 0x24FFFFFF, Shader.TileMode.CLAMP
                         ));
                         canvas.drawRoundRect(rect, keyCorner, keyCorner, keyPaint);
                         canvas.drawRoundRect(rect, keyCorner, keyCorner, keyTopRimPaint);
@@ -494,18 +488,16 @@ public class FerroKeyboardService extends InputMethodService {
                         drawShiftIcon(canvas, cx, cy, rowH * 0.22f, (isShiftKey && shiftActive && !isFocused) ? 0xFF0F172A : 0xFFFFFFFF);
                     } else if ("BKSP".equals(label)) {
                         drawBackspaceIcon(canvas, cx, cy, rowH * 0.22f, 0xFFFFFFFF);
-                    } else if ("SYM".equals(label)) {
-                        drawSmileyIcon(canvas, cx, cy, rowH * 0.22f, 0xFFFFFFFF);
                     } else if ("ENTER".equals(label)) {
                         drawReturnIcon(canvas, cx, cy, rowH * 0.22f, 0xFFFFFFFF);
                     } else if ("SPACE".equals(label)) {
-                        String badge = shiftActive ? "CAPS" : "EN";
-                        canvas.drawText(badge, rect.right - 10f, rect.bottom - 8f, subTextPaint);
+                        String badge = (layerId == 1) ? "CAPS" : (layerId == 2) ? "123" : (layerId == 3) ? "SYM" : "EN";
+                        canvas.drawText(badge, rect.right - 12f, rect.bottom - 9f, subTextPaint);
                     } else {
-                        if ("123".equals(label) || "ABC".equals(label)) {
-                            textPaint.setTextSize(rowH * 0.31f);
+                        if (label.length() >= 3) {
+                            textPaint.setTextSize(rowH * 0.30f);
                         } else {
-                            textPaint.setTextSize(rowH * 0.39f);
+                            textPaint.setTextSize(rowH * 0.40f);
                         }
                         Paint.FontMetrics fm = textPaint.getFontMetrics();
                         float textY = cy - (fm.ascent + fm.descent) / 2f;
@@ -513,15 +505,6 @@ public class FerroKeyboardService extends InputMethodService {
                     }
                 }
             }
-
-            // 4. Bottom Footer Icons (Globe on Left, Mic on Right — matches screenshot)
-            float footerCy = cardBot - footerH * 0.52f;
-            float globeCx = padX + unitW * 0.85f;
-            float micCx = padX + gridW - unitW * 0.65f;
-            float iconR = footerH * 0.27f;
-
-            drawGlobeIcon(canvas, globeCx, footerCy, iconR);
-            drawMicIcon(canvas, micCx, footerCy, iconR);
         }
 
         private void drawShiftIcon(Canvas canvas, float cx, float cy, float s, int color) {
@@ -541,7 +524,7 @@ public class FerroKeyboardService extends InputMethodService {
         }
 
         private void drawBackspaceIcon(Canvas canvas, float cx, float cy, float s, int color) {
-            iconPaint.setStrokeWidth(2.2f);
+            iconPaint.setStrokeWidth(2.3f);
             iconPaint.setColor(color);
             path.reset();
             path.moveTo(cx - s * 1.15f, cy);
@@ -558,25 +541,8 @@ public class FerroKeyboardService extends InputMethodService {
             canvas.drawLine(xOff + d, cy - d, xOff - d, cy + d, iconPaint);
         }
 
-        private void drawSmileyIcon(Canvas canvas, float cx, float cy, float s, int color) {
-            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            p.setStyle(Paint.Style.FILL);
-            p.setColor(color);
-            canvas.drawCircle(cx, cy, s * 0.95f, p);
-
-            p.setColor(0xFF1E293B);
-            canvas.drawCircle(cx - s * 0.33f, cy - s * 0.22f, s * 0.13f, p);
-            canvas.drawCircle(cx + s * 0.33f, cy - s * 0.22f, s * 0.13f, p);
-
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(2.0f);
-            p.setStrokeCap(Paint.Cap.ROUND);
-            rect.set(cx - s * 0.48f, cy - s * 0.32f, cx + s * 0.48f, cy + s * 0.52f);
-            canvas.drawArc(rect, 20f, 140f, false, p);
-        }
-
         private void drawReturnIcon(Canvas canvas, float cx, float cy, float s, int color) {
-            iconPaint.setStrokeWidth(2.3f);
+            iconPaint.setStrokeWidth(2.4f);
             iconPaint.setColor(color);
             path.reset();
             path.moveTo(cx + s * 0.95f, cy - s * 0.55f);
@@ -589,23 +555,6 @@ public class FerroKeyboardService extends InputMethodService {
             path.lineTo(cx - s * 0.95f, cy + s * 0.25f);
             path.lineTo(cx - s * 0.45f, cy + s * 0.72f);
             canvas.drawPath(path, iconPaint);
-        }
-
-        private void drawGlobeIcon(Canvas canvas, float cx, float cy, float r) {
-            canvas.drawCircle(cx, cy, r, footerIconPaint);
-            rect.set(cx - r * 0.52f, cy - r, cx + r * 0.52f, cy + r);
-            canvas.drawOval(rect, footerIconPaint);
-            canvas.drawLine(cx - r, cy, cx + r, cy, footerIconPaint);
-            canvas.drawLine(cx, cy - r, cx, cy + r, footerIconPaint);
-        }
-
-        private void drawMicIcon(Canvas canvas, float cx, float cy, float r) {
-            rect.set(cx - r * 0.38f, cy - r * 0.95f, cx + r * 0.38f, cy + r * 0.15f);
-            canvas.drawRoundRect(rect, r * 0.38f, r * 0.38f, footerIconPaint);
-            rect.set(cx - r * 0.72f, cy - r * 0.55f, cx + r * 0.72f, cy + r * 0.52f);
-            canvas.drawArc(rect, 0f, 180f, false, footerIconPaint);
-            canvas.drawLine(cx, cy + r * 0.52f, cx, cy + r * 0.95f, footerIconPaint);
-            canvas.drawLine(cx - r * 0.42f, cy + r * 0.95f, cx + r * 0.42f, cy + r * 0.95f, footerIconPaint);
         }
     }
 }

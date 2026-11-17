@@ -5,10 +5,10 @@ use std::sync::Mutex;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Layer {
-    Lower,
-    Upper,
-    Numbers,
-    Symbols,
+    Lower = 0,
+    Upper = 1,
+    Numbers = 2,
+    Symbols = 3,
 }
 
 struct KeyboardState {
@@ -29,10 +29,10 @@ impl KeyboardState {
     fn row_len(row: usize) -> usize {
         match row {
             0 => 3,  // Top Floating Pill: [PREV, NEXT, DONE]
-            1 => 10, // Q W E R T Y U I O P
+            1 => 10, // Q W E R T Y U I O P (or 1..0 / symbols)
             2 => 9,  // A S D F G H J K L
-            3 => 9,  // SHIFT Z X C V B N M BKSP
-            4 => 4,  // 123 SYM SPACE ENTER
+            3 => 9,  // SHIFT/#+= Z X C V B N M BKSP
+            4 => 4,  // [123/ABC] [#+=] [SPACE] [ENTER]
             _ => 10,
         }
     }
@@ -87,11 +87,11 @@ impl KeyboardState {
 
         const NUM_R1: [&str; 10] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
         const NUM_R2: [&str; 9] = ["-", "/", ":", ";", "(", ")", "$", "&", "@"];
-        const NUM_R3: [&str; 9] = ["SHIFT", ".", ",", "?", "!", "'", "\"", "_", "BKSP"];
+        const NUM_R3: [&str; 9] = ["#+=_L", ".", ",", "?", "!", "'", "\"", "_", "BKSP"];
 
         const SYM_R1: [&str; 10] = ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="];
         const SYM_R2: [&str; 9] = ["_", "\\", "|", "~", "<", ">", "€", "£", "₹"];
-        const SYM_R3: [&str; 9] = ["SHIFT", ".", ",", "?", "!", "'", "\"", "•", "BKSP"];
+        const SYM_R3: [&str; 9] = ["123_L", ".", ",", "?", "!", "'", "\"", "•", "BKSP"];
 
         match r {
             0 => PILL[c.min(2)],
@@ -115,7 +115,10 @@ impl KeyboardState {
                     Layer::Numbers | Layer::Symbols => "ABC",
                     _ => "123",
                 },
-                1 => "SYM",
+                1 => match self.layer {
+                    Layer::Symbols => "123",
+                    _ => "#+=",
+                },
                 2 => "SPACE",
                 _ => "ENTER",
             },
@@ -138,19 +141,16 @@ impl KeyboardState {
                 };
                 "REDRAW".to_string()
             }
-            "123" => {
+            "123" | "123_L" => {
                 self.layer = Layer::Numbers;
+                "REDRAW".to_string()
+            }
+            "#+=" | "#+=_L" => {
+                self.layer = Layer::Symbols;
                 "REDRAW".to_string()
             }
             "ABC" => {
                 self.layer = Layer::Lower;
-                "REDRAW".to_string()
-            }
-            "SYM" => {
-                self.layer = match self.layer {
-                    Layer::Symbols => Layer::Lower,
-                    _ => Layer::Symbols,
-                };
                 "REDRAW".to_string()
             }
             "BKSP" => "BACKSPACE".to_string(),
@@ -168,12 +168,8 @@ impl KeyboardState {
     }
 
     fn serialize_grid(&self) -> String {
-        let shift_active = if self.layer == Layer::Upper || self.layer == Layer::Symbols {
-            1
-        } else {
-            0
-        };
-        let mut out = format!("{},{},{}\n", self.row, self.col, shift_active);
+        let layer_id = self.layer as u8;
+        let mut out = format!("{},{},{}\n", self.row, self.col, layer_id);
         for r in 0..=4 {
             let len = Self::row_len(r);
             let mut items = Vec::with_capacity(len);
