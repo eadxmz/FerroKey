@@ -6,15 +6,17 @@ use std::sync::Mutex;
 #[derive(Clone, Copy, PartialEq)]
 enum Layer {
     Lower = 0,
-    Upper = 1,
-    Numbers = 2,
-    Symbols = 3,
+    Shift = 1,    // Single-tap (or auto-cap): capitalizes 1 letter then reverts to Lower
+    CapsLock = 2, // Double-tap: stays capitalized until toggled off
+    Numbers = 3,
+    Symbols = 4,
 }
 
 struct KeyboardState {
     row: usize,
     col: usize,
     layer: Layer,
+    last_was_sentence_end: bool,
 }
 
 impl KeyboardState {
@@ -22,16 +24,17 @@ impl KeyboardState {
         Self {
             row: 1,
             col: 0,
-            layer: Layer::Lower,
+            layer: Layer::Shift, // Auto-capitalize first word by default
+            last_was_sentence_end: false,
         }
     }
 
     fn row_len(row: usize) -> usize {
         match row {
             0 => 3,  // Top Floating Pill: [PREV, NEXT, DONE]
-            1 => 10, // Q W E R T Y U I O P (or 1..0 / symbols)
-            2 => 9,  // A S D F G H J K L
-            3 => 9,  // SHIFT/#+= Z X C V B N M BKSP
+            1 => 10, // q..p / Q..P / 1..0
+            2 => 9,  // a..l / A..L
+            3 => 9,  // SHIFT z..m BKSP
             4 => 4,  // [123/ABC] [#+=] [SPACE] [ENTER]
             _ => 10,
         }
@@ -81,9 +84,13 @@ impl KeyboardState {
     fn key_label(&self, r: usize, c: usize) -> &'static str {
         const PILL: [&str; 3] = ["PREV", "NEXT", "DONE"];
 
-        const ALPHA_R1: [&str; 10] = ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"];
-        const ALPHA_R2: [&str; 9] = ["A", "S", "D", "F", "G", "H", "J", "K", "L"];
-        const ALPHA_R3: [&str; 9] = ["SHIFT", "Z", "X", "C", "V", "B", "N", "M", "BKSP"];
+        const LOWER_R1: [&str; 10] = ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"];
+        const LOWER_R2: [&str; 9] = ["a", "s", "d", "f", "g", "h", "j", "k", "l"];
+        const LOWER_R3: [&str; 9] = ["SHIFT", "z", "x", "c", "v", "b", "n", "m", "BKSP"];
+
+        const UPPER_R1: [&str; 10] = ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"];
+        const UPPER_R2: [&str; 9] = ["A", "S", "D", "F", "G", "H", "J", "K", "L"];
+        const UPPER_R3: [&str; 9] = ["SHIFT", "Z", "X", "C", "V", "B", "N", "M", "BKSP"];
 
         const NUM_R1: [&str; 10] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
         const NUM_R2: [&str; 9] = ["-", "/", ":", ";", "(", ")", "$", "&", "@"];
@@ -96,17 +103,20 @@ impl KeyboardState {
         match r {
             0 => PILL[c.min(2)],
             1 => match self.layer {
-                Layer::Lower | Layer::Upper => ALPHA_R1[c],
+                Layer::Lower => LOWER_R1[c],
+                Layer::Shift | Layer::CapsLock => UPPER_R1[c],
                 Layer::Numbers => NUM_R1[c],
                 Layer::Symbols => SYM_R1[c],
             },
             2 => match self.layer {
-                Layer::Lower | Layer::Upper => ALPHA_R2[c],
+                Layer::Lower => LOWER_R2[c],
+                Layer::Shift | Layer::CapsLock => UPPER_R2[c],
                 Layer::Numbers => NUM_R2[c],
                 Layer::Symbols => SYM_R2[c],
             },
             3 => match self.layer {
-                Layer::Lower | Layer::Upper => ALPHA_R3[c],
+                Layer::Lower => LOWER_R3[c],
+                Layer::Shift | Layer::CapsLock => UPPER_R3[c],
                 Layer::Numbers => NUM_R3[c],
                 Layer::Symbols => SYM_R3[c],
             },
@@ -133,9 +143,11 @@ impl KeyboardState {
             "NEXT" => "CURSOR_RIGHT".to_string(),
             "DONE" => "HIDE".to_string(),
             "SHIFT" => {
+                // Single tap: Lower -> Shift. Second tap: Shift -> CapsLock. Third tap: CapsLock -> Lower.
                 self.layer = match self.layer {
-                    Layer::Lower => Layer::Upper,
-                    Layer::Upper => Layer::Lower,
+                    Layer::Lower => Layer::Shift,
+                    Layer::Shift => Layer::CapsLock,
+                    Layer::CapsLock => Layer::Lower,
                     Layer::Numbers => Layer::Symbols,
                     Layer::Symbols => Layer::Numbers,
                 };
@@ -153,16 +165,30 @@ impl KeyboardState {
                 self.layer = Layer::Lower;
                 "REDRAW".to_string()
             }
-            "BKSP" => "BACKSPACE".to_string(),
-            "SPACE" => "COMMIT: ".to_string(),
-            "ENTER" => "SUBMIT".to_string(),
+            "BKSP" => {
+                self.last_was_sentence_end = false;
+                "BACKSPACE".to_string()
+            }
+            "SPACE" => {
+                if self.last_was_sentence_end && self.layer == Layer::Lower {
+                    self.layer = Layer::Shift;
+                }
+                self.last_was_sentence_end = false;
+                "COMMIT: ".to_string()
+            }
+            "ENTER" => {
+                self.last_was_sentence_end = false;
+                "SUBMIT".to_string()
+            }
             ch => {
-                let out = if self.layer == Layer::Lower {
-                    ch.to_ascii_lowercase()
-                } else {
-                    ch.to_string()
-                };
-                "COMMIT:".to_string() + &out
+                let committed = ch.to_string();
+                self.last_was_sentence_end = matches!(ch, "." | "!" | "?");
+
+                // Auto-drop from one-shot Shift to Lower after typing a character
+                if self.layer == Layer::Shift {
+                    self.layer = Layer::Lower;
+                }
+                "COMMIT:".to_string() + &committed
             }
         }
     }
@@ -221,10 +247,30 @@ pub extern "system" fn Java_com_ferrostb_keyboard_FerroKeyboardService_nativeOnK
             "REDRAW".to_string()
         }
         KEYCODE_DPAD_CENTER | KEYCODE_ENTER | KEYCODE_NUMPAD_ENTER => state.activate_current(),
-        KEYCODE_DEL => "BACKSPACE".to_string(),
+        KEYCODE_DEL => {
+            state.last_was_sentence_end = false;
+            "BACKSPACE".to_string()
+        }
         _ => "PASS".to_string(),
     };
     env.new_string(response).unwrap().into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_ferrostb_keyboard_FerroKeyboardService_nativeSetShiftState(
+    _env: JNIEnv,
+    _class: JClass,
+    should_cap: jint,
+) {
+    let mut state = STATE.lock().unwrap();
+    // Only auto-adjust when in alphabetic layers (don't kick user out of CapsLock/Numbers)
+    if state.layer == Layer::Lower || state.layer == Layer::Shift {
+        state.layer = if should_cap != 0 {
+            Layer::Shift
+        } else {
+            Layer::Lower
+        };
+    }
 }
 
 #[no_mangle]
