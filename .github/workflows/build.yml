@@ -1,0 +1,90 @@
+name: Build FerroKey Liquid Glass APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain & Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-linux-androideabi,aarch64-linux-android
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Compile Rust Liquid Glass Core (.so)
+        run: |
+          cargo ndk -t armeabi-v7a -t arm64-v8a -o ./jniLibs build --release
+
+      - name: Package & Sign Android APK
+        run: |
+          BT=$(ls -d "$ANDROID_HOME/build-tools/"* | sort -V | tail -n 1)
+          PLATFORM=$(ls -d "$ANDROID_HOME/platforms/"* | sort -V | tail -n 1)
+
+          mkdir -p build/classes build/apk/lib/armeabi-v7a build/apk/lib/arm64-v8a
+
+          # 1. Compile XML resources & link base APK
+          "$BT/aapt2" compile res/xml/method.xml -o build/
+          "$BT/aapt2" link -o build/unsigned.apk \
+            -I "$PLATFORM/android.jar" \
+            --manifest AndroidManifest.xml \
+            --java build/classes \
+            build/xml_method.xml.flat
+
+          # 2. Compile Java shim to DEX
+          javac -source 1.8 -target 1.8 \
+            -bootclasspath "$PLATFORM/android.jar" \
+            -d build/classes \
+            java/com/ferrostb/keyboard/FerroKeyboardService.java \
+            build/classes/com/ferrostb/keyboard/R.java
+
+          "$BT/d8" --lib "$PLATFORM/android.jar" \
+            --output build/apk \
+            $(find build/classes -name "*.class")
+
+          # 3. Bundle DEX + Rust native libraries into APK
+          cp jniLibs/armeabi-v7a/libferrokey.so build/apk/lib/armeabi-v7a/
+          cp jniLibs/arm64-v8a/libferrokey.so build/apk/lib/arm64-v8a/
+
+          cd build/apk
+          zip -u ../unsigned.apk classes.dex
+          zip -u -0 -r ../unsigned.apk lib/
+          cd ../..
+
+          # 4. Align & Sign APK
+          "$BT/zipalign" -f -p 4 build/unsigned.apk build/aligned.apk
+
+          keytool -genkey -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=FerroSTB,O=Android,C=US"
+
+          "$BT/apksigner" sign \
+            --ks debug.keystore \
+            --ks-pass pass:android \
+            --out ferrokey-liquid-glass.apk \
+            build/aligned.apk
+
+      - name: Upload Signed APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferrokey-liquid-glass-apk
+          path: ferrokey-liquid-glass.apk
