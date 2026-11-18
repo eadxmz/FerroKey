@@ -12,10 +12,18 @@ enum Layer {
     Symbols = 4,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum CtrlMode {
+    Off = 0,
+    OneShot = 1, // Single-tap: fires one Ctrl+<key> combo then reverts to Off
+    Locked = 2,  // Double-tap: stays active for repeated Ctrl+Z / Ctrl+V until toggled off
+}
+
 struct KeyboardState {
     row: usize,
     col: usize,
     layer: Layer,
+    ctrl: CtrlMode,
     last_was_sentence_end: bool,
 }
 
@@ -24,7 +32,8 @@ impl KeyboardState {
         Self {
             row: 1,
             col: 0,
-            layer: Layer::Shift, // Auto-capitalize first word by default
+            layer: Layer::Shift,
+            ctrl: CtrlMode::Off,
             last_was_sentence_end: false,
         }
     }
@@ -35,7 +44,7 @@ impl KeyboardState {
             1 => 10, // q..p / Q..P / 1..0
             2 => 9,  // a..l / A..L
             3 => 9,  // SHIFT z..m BKSP
-            4 => 4,  // [123/ABC] [#+=] [SPACE] [ENTER]
+            4 => 5,  // [123/ABC] [#+=] [CTRL] [SPACE] [ENTER]
             _ => 10,
         }
     }
@@ -62,16 +71,18 @@ impl KeyboardState {
                 (2, 3) => self.col,
                 (3, 2) => self.col,
                 (3, 4) => match self.col {
-                    0 => 0,
-                    1 => 1,
-                    2..=6 => 2,
-                    _ => 3,
+                    0 => 0,      // SHIFT -> 123
+                    1 => 1,      // z -> #+=
+                    2 => 2,      // x -> CTRL
+                    3..=6 => 3,  // c..n -> SPACE
+                    _ => 4,      // m, BKSP -> ENTER
                 },
                 (4, 3) => match self.col {
-                    0 => 0,
-                    1 => 1,
-                    2 => 4,
-                    _ => 8,
+                    0 => 0,      // 123 -> SHIFT
+                    1 => 1,      // #+= -> z
+                    2 => 2,      // CTRL -> x (right in the z/x/c/v cluster)
+                    3 => 4,      // SPACE -> v
+                    _ => 8,      // ENTER -> BKSP
                 },
                 _ => self.col.min(Self::row_len(new_row) - 1),
             };
@@ -129,7 +140,8 @@ impl KeyboardState {
                     Layer::Symbols => "123",
                     _ => "#+=",
                 },
-                2 => "SPACE",
+                2 => "CTRL",
+                3 => "SPACE",
                 _ => "ENTER",
             },
             _ => "",
@@ -142,8 +154,22 @@ impl KeyboardState {
             "PREV" => "CURSOR_LEFT".to_string(),
             "NEXT" => "CURSOR_RIGHT".to_string(),
             "DONE" => "HIDE".to_string(),
+            "CTRL" => {
+                // Single tap: Off -> OneShot. Double tap: OneShot -> Locked. Third tap: Off.
+                self.ctrl = match self.ctrl {
+                    CtrlMode::Off => CtrlMode::OneShot,
+                    CtrlMode::OneShot => CtrlMode::Locked,
+                    CtrlMode::Locked => CtrlMode::Off,
+                };
+                // Switch back to letters automatically if user tapped Ctrl while on 123/#+=
+                if self.ctrl != CtrlMode::Off
+                    && (self.layer == Layer::Numbers || self.layer == Layer::Symbols)
+                {
+                    self.layer = Layer::Lower;
+                }
+                "REDRAW".to_string()
+            }
             "SHIFT" => {
-                // Single tap: Lower -> Shift. Second tap: Shift -> CapsLock. Third tap: CapsLock -> Lower.
                 self.layer = match self.layer {
                     Layer::Lower => Layer::Shift,
                     Layer::Shift => Layer::CapsLock,
@@ -154,10 +180,12 @@ impl KeyboardState {
                 "REDRAW".to_string()
             }
             "123" | "123_L" => {
+                self.ctrl = CtrlMode::Off;
                 self.layer = Layer::Numbers;
                 "REDRAW".to_string()
             }
             "#+=" | "#+=_L" => {
+                self.ctrl = CtrlMode::Off;
                 self.layer = Layer::Symbols;
                 "REDRAW".to_string()
             }
@@ -167,9 +195,18 @@ impl KeyboardState {
             }
             "BKSP" => {
                 self.last_was_sentence_end = false;
+                if self.ctrl != CtrlMode::Off {
+                    if self.ctrl == CtrlMode::OneShot {
+                        self.ctrl = CtrlMode::Off;
+                    }
+                    return "CTRL:BKSP".to_string();
+                }
                 "BACKSPACE".to_string()
             }
             "SPACE" => {
+                if self.ctrl == CtrlMode::OneShot {
+                    self.ctrl = CtrlMode::Off;
+                }
                 if self.last_was_sentence_end && self.layer == Layer::Lower {
                     self.layer = Layer::Shift;
                 }
@@ -177,14 +214,22 @@ impl KeyboardState {
                 "COMMIT: ".to_string()
             }
             "ENTER" => {
+                self.ctrl = CtrlMode::Off;
                 self.last_was_sentence_end = false;
                 "SUBMIT".to_string()
             }
             ch => {
+                if self.ctrl != CtrlMode::Off {
+                    if self.ctrl == CtrlMode::OneShot {
+                        self.ctrl = CtrlMode::Off;
+                    }
+                    let upper = ch.to_ascii_uppercase();
+                    return format!("CTRL:{}", upper);
+                }
+
                 let committed = ch.to_string();
                 self.last_was_sentence_end = matches!(ch, "." | "!" | "?");
 
-                // Auto-drop from one-shot Shift to Lower after typing a character
                 if self.layer == Layer::Shift {
                     self.layer = Layer::Lower;
                 }
@@ -195,7 +240,8 @@ impl KeyboardState {
 
     fn serialize_grid(&self) -> String {
         let layer_id = self.layer as u8;
-        let mut out = format!("{},{},{}\n", self.row, self.col, layer_id);
+        let ctrl_id = self.ctrl as u8;
+        let mut out = format!("{},{},{},{}\n", self.row, self.col, layer_id, ctrl_id);
         for r in 0..=4 {
             let len = Self::row_len(r);
             let mut items = Vec::with_capacity(len);
@@ -263,7 +309,6 @@ pub extern "system" fn Java_com_ferrostb_keyboard_FerroKeyboardService_nativeSet
     should_cap: jint,
 ) {
     let mut state = STATE.lock().unwrap();
-    // Only auto-adjust when in alphabetic layers (don't kick user out of CapsLock/Numbers)
     if state.layer == Layer::Lower || state.layer == Layer::Shift {
         state.layer = if should_cap != 0 {
             Layer::Shift

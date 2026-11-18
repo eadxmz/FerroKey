@@ -11,7 +11,10 @@ import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.inputmethodservice.InputMethodService;
+import android.os.SystemClock;
 import android.view.Gravity;
+import android.view.InputDevice;
+import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.Window;
@@ -144,7 +147,6 @@ public class FerroKeyboardService extends InputMethodService {
         int screenW = getResources().getDisplayMetrics().widthPixels;
         int screenH = getResources().getDisplayMetrics().heightPixels;
 
-        // Sleeker, more compact floating card (52% width, 38% height)
         int cardW = (int) (screenW * 0.52f);
         int cardH = (int) (screenH * 0.38f);
         int bottomMargin = (int) (screenH * 0.035f);
@@ -172,6 +174,57 @@ public class FerroKeyboardService extends InputMethodService {
     private InputConnection activeConnection() {
         InputConnection ic = getCurrentInputConnection();
         return (ic != null) ? ic : cachedIc;
+    }
+
+    private void sendCtrlKeyEvent(InputConnection ic, int keyCode) {
+        long now = SystemClock.uptimeMillis();
+        int meta = KeyEvent.META_CTRL_ON | KeyEvent.META_CTRL_LEFT_ON;
+        int flags = KeyEvent.FLAG_SOFT_KEYBOARD | KeyEvent.FLAG_KEEP_TOUCH_MODE;
+        ic.sendKeyEvent(new KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0, meta,
+                KeyCharacterMap.VIRTUAL_KEYBOARD, 0, flags, InputDevice.SOURCE_KEYBOARD));
+        ic.sendKeyEvent(new KeyEvent(now, now + 10, KeyEvent.ACTION_UP, keyCode, 0, meta,
+                KeyCharacterMap.VIRTUAL_KEYBOARD, 0, flags, InputDevice.SOURCE_KEYBOARD));
+    }
+
+    private void executeCtrlShortcut(InputConnection ic, String key) {
+        if ("A".equals(key)) {
+            if (!ic.performContextMenuAction(android.R.id.selectAll)) {
+                sendCtrlKeyEvent(ic, KeyEvent.KEYCODE_A);
+            }
+        } else if ("Z".equals(key)) {
+            // 0x01020032 is android.R.id.undo; falls back to raw Ctrl+Z KeyEvent for Chromium WebViews
+            if (!ic.performContextMenuAction(0x01020032)) {
+                sendCtrlKeyEvent(ic, KeyEvent.KEYCODE_Z);
+            }
+        } else if ("Y".equals(key)) {
+            // 0x01020033 is android.R.id.redo
+            if (!ic.performContextMenuAction(0x01020033)) {
+                sendCtrlKeyEvent(ic, KeyEvent.KEYCODE_Y);
+            }
+        } else if ("X".equals(key)) {
+            if (!ic.performContextMenuAction(android.R.id.cut)) {
+                sendCtrlKeyEvent(ic, KeyEvent.KEYCODE_X);
+            }
+            CharSequence rem = ic.getTextBeforeCursor(1, 0);
+            if (rem == null || rem.length() == 0) {
+                nativeSetShiftState(1);
+            }
+        } else if ("C".equals(key)) {
+            if (!ic.performContextMenuAction(android.R.id.copy)) {
+                sendCtrlKeyEvent(ic, KeyEvent.KEYCODE_C);
+            }
+        } else if ("V".equals(key)) {
+            if (!ic.performContextMenuAction(android.R.id.paste)) {
+                sendCtrlKeyEvent(ic, KeyEvent.KEYCODE_V);
+            }
+        } else if ("BKSP".equals(key)) {
+            sendCtrlKeyEvent(ic, KeyEvent.KEYCODE_DEL);
+        } else if (key.length() == 1) {
+            char ch = key.charAt(0);
+            if (ch >= 'A' && ch <= 'Z') {
+                sendCtrlKeyEvent(ic, KeyEvent.KEYCODE_A + (ch - 'A'));
+            }
+        }
     }
 
     @Override
@@ -203,9 +256,10 @@ public class FerroKeyboardService extends InputMethodService {
         if (ic != null) {
             if (action.startsWith("COMMIT:")) {
                 ic.commitText(action.substring(7), 1);
+            } else if (action.startsWith("CTRL:")) {
+                executeCtrlShortcut(ic, action.substring(5));
             } else if ("BACKSPACE".equals(action)) {
                 ic.deleteSurroundingText(1, 0);
-                // Re-enable Shift automatically if user deleted back to the start of the text field
                 CharSequence rem = ic.getTextBeforeCursor(1, 0);
                 if (rem == null || rem.length() == 0) {
                     nativeSetShiftState(1);
@@ -262,11 +316,13 @@ public class FerroKeyboardService extends InputMethodService {
         private final Paint cardRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint keyPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint keyTopRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ctrlTargetRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint focusPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint focusRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint shiftActivePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint activeModPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint subTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint shortcutBadgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
         private final Path path = new Path();
@@ -285,11 +341,15 @@ public class FerroKeyboardService extends InputMethodService {
             keyTopRimPaint.setStrokeWidth(1.1f);
             keyTopRimPaint.setColor(0x32FFFFFF);
 
+            ctrlTargetRimPaint.setStyle(Paint.Style.STROKE);
+            ctrlTargetRimPaint.setStrokeWidth(1.6f);
+            ctrlTargetRimPaint.setColor(0xAA38BDF8);
+
             focusRimPaint.setStyle(Paint.Style.STROKE);
             focusRimPaint.setStrokeWidth(2.2f);
             focusRimPaint.setColor(0xFFFFFFFF);
 
-            shiftActivePaint.setColor(0xF2FFFFFF);
+            activeModPaint.setColor(0xF2FFFFFF);
 
             textPaint.setColor(0xFFF8FAFC);
             textPaint.setTextAlign(Paint.Align.CENTER);
@@ -299,9 +359,24 @@ public class FerroKeyboardService extends InputMethodService {
             subTextPaint.setTextAlign(Paint.Align.RIGHT);
             subTextPaint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
 
+            shortcutBadgePaint.setColor(0xFF7DD3FC);
+            shortcutBadgePaint.setTextAlign(Paint.Align.CENTER);
+            shortcutBadgePaint.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+
             iconPaint.setStyle(Paint.Style.STROKE);
             iconPaint.setStrokeCap(Paint.Cap.ROUND);
             iconPaint.setStrokeJoin(Paint.Join.ROUND);
+        }
+
+        private String getCtrlBadgeForKey(String label) {
+            String upper = label.toUpperCase();
+            if ("A".equals(upper)) return "ALL";
+            if ("Z".equals(upper)) return "UNDO";
+            if ("X".equals(upper)) return "CUT";
+            if ("C".equals(upper)) return "COPY";
+            if ("V".equals(upper)) return "PASTE";
+            if ("Y".equals(upper)) return "REDO";
+            return null;
         }
 
         @Override
@@ -315,9 +390,13 @@ public class FerroKeyboardService extends InputMethodService {
             int focusRow = Integer.parseInt(header[0]);
             int focusCol = Integer.parseInt(header[1]);
             int layerId = Integer.parseInt(header[2]);
+            int ctrlId = (header.length > 3) ? Integer.parseInt(header[3]) : 0;
+
             boolean isShift = (layerId == 1);
             boolean isCapsLock = (layerId == 2);
             boolean shiftOrCaps = isShift || isCapsLock;
+            boolean isCtrlActive = (ctrlId > 0);
+            boolean isCtrlLocked = (ctrlId == 2);
 
             float w = getWidth();
             float h = getHeight();
@@ -416,7 +495,7 @@ public class FerroKeyboardService extends InputMethodService {
             ));
             canvas.drawRoundRect(rect, cardRadius, cardRadius, cardRimPaint);
 
-            // 3. Sleeker, Smaller Keycaps with Wider Gaps
+            // 3. Key Grid (Rows 1..4)
             float padX = outerPad + 20f;
             float padY = 16f;
             float gridTop = cardTop + padY;
@@ -431,6 +510,7 @@ public class FerroKeyboardService extends InputMethodService {
             float keyCorner = 12f;
 
             subTextPaint.setTextSize(rowH * 0.20f);
+            shortcutBadgePaint.setTextSize(rowH * 0.16f);
 
             for (int r = 1; r <= 4; r++) {
                 String[] keys = lines[r + 1].split("\t");
@@ -459,17 +539,21 @@ public class FerroKeyboardService extends InputMethodService {
                             xRight = xLeft + unitW;
                         }
                     } else {
+                        // Row 4: [123 (1.25u)] [#+= (1.25u)] [Ctrl (1.30u)] [SPACE (3.90u)] [ENTER (2.30u)]
                         if (c == 0) {
                             xLeft = padX;
-                            xRight = padX + unitW * 1.32f;
+                            xRight = padX + unitW * 1.25f;
                         } else if (c == 1) {
-                            xLeft = padX + unitW * 1.32f;
-                            xRight = padX + unitW * 2.64f;
+                            xLeft = padX + unitW * 1.25f;
+                            xRight = padX + unitW * 2.50f;
                         } else if (c == 2) {
-                            xLeft = padX + unitW * 2.64f;
-                            xRight = padX + unitW * 7.50f;
+                            xLeft = padX + unitW * 2.50f;
+                            xRight = padX + unitW * 3.80f;
+                        } else if (c == 3) {
+                            xLeft = padX + unitW * 3.80f;
+                            xRight = padX + unitW * 7.70f;
                         } else {
-                            xLeft = padX + unitW * 7.50f;
+                            xLeft = padX + unitW * 7.70f;
                             xRight = padX + gridW;
                         }
                     }
@@ -479,10 +563,12 @@ public class FerroKeyboardService extends InputMethodService {
                     String label = rawLabel.replace("_L", "");
                     boolean isFocused = (r == focusRow && c == focusCol);
                     boolean isShiftKey = "SHIFT".equals(label);
+                    boolean isCtrlKey = "CTRL".equals(label);
+                    boolean isModLit = (isShiftKey && shiftOrCaps) || (isCtrlKey && isCtrlActive);
+                    String ctrlBadge = isCtrlActive ? getCtrlBadgeForKey(label) : null;
 
-                    if (isShiftKey && shiftOrCaps) {
-                        // Solid illuminated white keycap when Shift or Caps Lock is active
-                        canvas.drawRoundRect(rect, keyCorner, keyCorner, shiftActivePaint);
+                    if (isModLit) {
+                        canvas.drawRoundRect(rect, keyCorner, keyCorner, activeModPaint);
                         if (isFocused) {
                             rect.inset(-1.8f, -1.8f);
                             focusRimPaint.setColor(0xFF38BDF8);
@@ -502,10 +588,13 @@ public class FerroKeyboardService extends InputMethodService {
                     } else {
                         keyPaint.setShader(new LinearGradient(
                                 rect.left, rect.top, rect.left, rect.bottom,
-                                0x36FFFFFF, 0x20FFFFFF, Shader.TileMode.CLAMP
+                                (ctrlBadge != null) ? 0x4438BDF8 : 0x36FFFFFF,
+                                (ctrlBadge != null) ? 0x220284C7 : 0x20FFFFFF,
+                                Shader.TileMode.CLAMP
                         ));
                         canvas.drawRoundRect(rect, keyCorner, keyCorner, keyPaint);
-                        canvas.drawRoundRect(rect, keyCorner, keyCorner, keyTopRimPaint);
+                        canvas.drawRoundRect(rect, keyCorner, keyCorner,
+                                (ctrlBadge != null) ? ctrlTargetRimPaint : keyTopRimPaint);
                     }
 
                     float cx = rect.centerX();
@@ -514,12 +603,35 @@ public class FerroKeyboardService extends InputMethodService {
                     if (isShiftKey) {
                         int iconColor = shiftOrCaps ? 0xFF0F172A : 0xFFFFFFFF;
                         drawShiftIcon(canvas, cx, cy, rowH * 0.21f, iconColor, shiftOrCaps, isCapsLock);
+                    } else if (isCtrlKey) {
+                        textPaint.setColor(isCtrlActive ? 0xFF0F172A : 0xFFF8FAFC);
+                        textPaint.setTextSize(rowH * 0.27f);
+                        Paint.FontMetrics fm = textPaint.getFontMetrics();
+                        float yOffset = isCtrlLocked ? -rowH * 0.05f : 0f;
+                        float textY = cy - (fm.ascent + fm.descent) / 2f + yOffset;
+                        canvas.drawText("Ctrl", cx, textY, textPaint);
+                        textPaint.setColor(0xFFF8FAFC);
+
+                        if (isCtrlLocked) {
+                            Paint barPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                            barPaint.setStyle(Paint.Style.FILL);
+                            barPaint.setColor(0xFF0F172A);
+                            RectF bar = new RectF(
+                                    cx - rowH * 0.16f,
+                                    rect.bottom - rowH * 0.15f,
+                                    cx + rowH * 0.16f,
+                                    rect.bottom - rowH * 0.09f
+                            );
+                            canvas.drawRoundRect(bar, 2f, 2f, barPaint);
+                        }
                     } else if ("BKSP".equals(label)) {
                         drawBackspaceIcon(canvas, cx, cy, rowH * 0.20f, 0xFFFFFFFF);
                     } else if ("ENTER".equals(label)) {
                         drawReturnIcon(canvas, cx, cy, rowH * 0.20f, 0xFFFFFFFF);
                     } else if ("SPACE".equals(label)) {
-                        String badge = isCapsLock ? "CAPS" : isShift ? "SHIFT" : (layerId == 3) ? "123" : (layerId == 4) ? "SYM" : "en";
+                        String badge = isCtrlLocked ? "CTRL LOCK" : isCtrlActive ? "CTRL"
+                                : isCapsLock ? "CAPS" : isShift ? "SHIFT"
+                                : (layerId == 3) ? "123" : (layerId == 4) ? "SYM" : "en";
                         canvas.drawText(badge, rect.right - 10f, rect.bottom - 7f, subTextPaint);
                     } else {
                         if (label.length() >= 3) {
@@ -528,8 +640,12 @@ public class FerroKeyboardService extends InputMethodService {
                             textPaint.setTextSize(rowH * 0.35f);
                         }
                         Paint.FontMetrics fm = textPaint.getFontMetrics();
-                        float textY = cy - (fm.ascent + fm.descent) / 2f;
+                        float textY = cy - (fm.ascent + fm.descent) / 2f - ((ctrlBadge != null) ? rowH * 0.07f : 0f);
                         canvas.drawText(label, cx, textY, textPaint);
+
+                        if (ctrlBadge != null) {
+                            canvas.drawText(ctrlBadge, cx, rect.bottom - 5.5f, shortcutBadgePaint);
+                        }
                     }
                 }
             }
@@ -559,7 +675,6 @@ public class FerroKeyboardService extends InputMethodService {
             canvas.drawPath(path, p);
 
             if (isCapsLock) {
-                // Draw Caps Lock underline bar beneath the shift arrow
                 Paint barPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
                 barPaint.setStyle(Paint.Style.FILL);
                 barPaint.setColor(color);
